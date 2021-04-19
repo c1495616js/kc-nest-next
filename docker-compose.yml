@@ -1,0 +1,100 @@
+version: "3"
+
+services:
+  ### Backend #############################
+  be:
+    build:
+      context: ./be
+      dockerfile: Dockerfile
+    ports:
+      - "4001:4000"
+    environment:
+      - NODE_ENV=development
+      - KEYCLOAK_REALM=kc_realm
+      - KEYCLOAK_CLIENT=kc_client
+      - KEYCLOAK_FE_CLIENT=fe-client
+      - KEYCLOAK_AUTH_URL=http://keycloak:8080/auth
+      - KEYCLOAK_SECRET=1c668668-6aa0-41e3-95a9-9171717cbe2d
+    expose:
+      - "4001"
+    volumes:
+      # Binds the application folder from the host inside the container for fast changes
+      - ./be:/app
+      # Ignores/Hides the node_modules from the bind on the host allowing the node_modules
+      # from inside the container to be used instead
+      - /app/node_modules
+    depends_on:
+      - postgres
+    networks:
+      - backend
+
+  ### Database #############################
+  postgres:
+    build:
+      context: ./.docker/postgres
+    ports:
+      - "5436:5432"
+    environment:
+      - POSTGRES_MULTIPLE_DATABASES="nest_api_dev","sonar","keycloak"
+      - POSTGRES_USER=db_user
+      - POSTGRES_PASSWORD=db_pass
+    networks:
+      - backend
+
+  ### KeyCloak ##############################
+  keycloak:
+    image: jboss/keycloak:11.0.2
+    environment:
+      DB_VENDOR: POSTGRES
+      DB_ADDR: postgres
+      DB_DATABASE: keycloak
+      DB_USER: db_user
+      DB_PASSWORD: db_pass
+      KEYCLOAK_LOGLEVEL: DEBUG
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: password
+      KEYCLOAK_IMPORT: /tmp/realm-export.json -Dkeycloak.profile.feature.upload_scripts=enabled
+    ports:
+      - 8081:8080
+    expose:
+      - "8081"
+    volumes:
+      - ./.docker/keycloak/realm-export.json:/tmp/realm-export.json
+      - ./.docker/keycloak/create-users.sh:/opt/jboss/startup-scripts/create-users.sh
+    depends_on:
+      - postgres
+    networks:
+      backend:
+        aliases:
+          - keycloak
+
+  ### Frontend ###############################
+  client:
+    image: next-frontend:dev
+    container_name: next-frontend-dev
+    stdin_open: true
+    build:
+      context: ./fe
+      dockerfile: Dockerfile
+    environment:
+      REALM_AUTH_URL: http://keycloak:8080/auth
+      API_HOST: http://keycloak:4000
+      KC_REALM: kc_realm
+    volumes:
+      - ./fe:/app
+      - /app/node_modules
+    ports:
+      - "3001:3000"
+    expose:
+      - "3001"
+    networks:
+      - backend
+    depends_on:
+      - be
+
+networks:
+  backend:
+    driver: "bridge"
+
+volumes:
+  postgres:
